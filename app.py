@@ -362,7 +362,7 @@ with st.sidebar:
     st.markdown("### About the system")
     st.markdown("""
 <div class="info-box">
-Movie Detective combines semantic retrieval, HyDE query expansion, structured clue extraction, and metadata-aware reranking to identify movies and TV series from incomplete memories.
+Movie Detective was developed by Charles Appiah Manu and Bryan Chau.It combines semantic retrieval, HyDE query expansion, structured clue extraction, and metadata-aware reranking to identify movies and TV series from incomplete memories.
 </div>
 """, unsafe_allow_html=True)
 
@@ -443,9 +443,9 @@ if results and top:
 
     fb1, fb2 = st.columns(2)
     with fb1:
-        st.button("👍 Correct", use_container_width=True, on_click=vote_up_results)
+        st.button("👏 My movie is in the Top 5", use_container_width=True, on_click=vote_up_results)
     with fb2:
-        st.button("👎 Wrong, Re-search", use_container_width=True, on_click=vote_down_results)
+        st.button(" 🫤 Movie not in results, Re-search", use_container_width=True, on_click=vote_down_results)
 
     if attributes:
         clues = []
