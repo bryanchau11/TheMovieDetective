@@ -224,6 +224,9 @@ defaults = {
     "attributes": {},
     "hyde_text": "",
     "do_search": False,
+    "keep_rejections": False,
+    "rejected_keys": [],
+    "feedback_message": "",
 }
 for key, value in defaults.items():
     if key not in st.session_state:
@@ -232,10 +235,38 @@ for key, value in defaults.items():
 
 def queue_quick_query(text: str):
     st.session_state.input_query = text
+    st.session_state.keep_rejections = False
     st.session_state.do_search = True
 
 
 def queue_search():
+    st.session_state.keep_rejections = False
+    st.session_state.do_search = True
+
+
+def result_key(item: dict) -> str:
+    return f"{item.get('title', '')}|{item.get('year', '')}|{item.get('media_type', '')}"
+
+
+def current_result_keys(limit: int = 10) -> list[str]:
+    return [result_key(item) for item in st.session_state.results[:limit]]
+
+
+def vote_up_results():
+    st.session_state.feedback_message = "Nice. I will keep this result set style for your query."
+
+
+def vote_down_results():
+    keys = current_result_keys(10)
+    if not keys:
+        return
+
+    for key in keys:
+        if key not in st.session_state.rejected_keys:
+            st.session_state.rejected_keys.append(key)
+
+    st.session_state.feedback_message = "Got it. I removed these results and searched again."
+    st.session_state.keep_rejections = True
     st.session_state.do_search = True
 
 
@@ -246,14 +277,20 @@ def clear_search():
     st.session_state.top_result = None
     st.session_state.attributes = {}
     st.session_state.hyde_text = ""
+    st.session_state.rejected_keys = []
+    st.session_state.feedback_message = ""
+    st.session_state.keep_rejections = False
     st.session_state.do_search = False
 
 
-def run_search(query_text: str):
+def run_search(query_text: str, keep_rejections: bool = False):
     clean_query = (query_text or "").strip()
     if not clean_query:
         clear_search()
         return
+
+    if not keep_rejections:
+        st.session_state.rejected_keys = []
 
     with st.spinner("Analyzing memory clues and searching the movie + TV corpus..."):
         hyde_text = hyde_expand_query(client_ai, clean_query)
@@ -276,11 +313,16 @@ def run_search(query_text: str):
         attributes = extract_attributes(client_ai, clean_query)
         results = rerank(clean_query, candidates, attributes)
 
+        rejected_set = set(st.session_state.rejected_keys)
+        if rejected_set:
+            results = [r for r in results if result_key(r) not in rejected_set]
+
         st.session_state.submitted_query = clean_query
         st.session_state.results = results
         st.session_state.top_result = results[0] if results else None
         st.session_state.attributes = attributes
         st.session_state.hyde_text = hyde_text
+        st.session_state.keep_rejections = False
         st.session_state.do_search = False
 
 
@@ -356,7 +398,7 @@ with btn_col2:
     st.button("Clear", use_container_width=True, on_click=clear_search)
 
 if st.session_state.do_search:
-    run_search(st.session_state.input_query)
+    run_search(st.session_state.input_query, keep_rejections=st.session_state.keep_rejections)
 
 results = st.session_state.results
 top = st.session_state.top_result
@@ -364,6 +406,9 @@ attributes = st.session_state.attributes
 
 if results and top:
     st.markdown('<div class="section-title">Top Match</div>', unsafe_allow_html=True)
+
+    if st.session_state.feedback_message:
+        st.info(st.session_state.feedback_message)
 
     fc1, fc2 = st.columns([1.05, 1.95])
 
@@ -392,6 +437,15 @@ if results and top:
         why_bits = top.get("why", [])
         if why_bits:
             st.caption("Why it matched: " + " • ".join(why_bits[:5]))
+
+    st.markdown('<div class="section-title">Rate These Results</div>', unsafe_allow_html=True)
+    st.caption("These buttons apply to the current top 10 results, not only the featured card.")
+
+    fb1, fb2 = st.columns(2)
+    with fb1:
+        st.button("👍 Correct", use_container_width=True, on_click=vote_up_results)
+    with fb2:
+        st.button("👎 Wrong, Re-search", use_container_width=True, on_click=vote_down_results)
 
     if attributes:
         clues = []
@@ -422,7 +476,8 @@ if results and top:
     st.markdown('<div class="section-title">Browse Results</div>', unsafe_allow_html=True)
 
     cols = st.columns(3)
-    for i, movie in enumerate(results[:9]):
+    display_results = results[:10]
+    for i, movie in enumerate(display_results):
         with cols[i % 3]:
             if movie.get("poster"):
                 st.image(movie["poster"], use_container_width=True)
@@ -461,6 +516,9 @@ if results and top:
         unsafe_allow_html=True
     )
 else:
+    if st.session_state.feedback_message:
+        st.info(st.session_state.feedback_message)
+
     st.markdown("""
 <div class="section-title">Start with a memory fragment</div>
 <div class="info-box">
