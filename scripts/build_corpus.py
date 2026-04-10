@@ -16,6 +16,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
+from utils.moviespoiler import load_spoiler_file
 
 
 WS_RE = re.compile(r"\s+")
@@ -55,7 +56,15 @@ def _year_from_date(date_str: Any) -> int | None:
         return None
 
 
-def _build_document(*, title: str, overview: str, tagline: str, genres: list[str], keywords: list[str]) -> str:
+def _build_document(
+    *,
+    title: str,
+    overview: str,
+    tagline: str,
+    genres: list[str],
+    keywords: list[str],
+    spoiler_excerpt: str,
+) -> str:
     parts: list[str] = []
     if title:
         parts.append(f"Title: {title}")
@@ -67,6 +76,8 @@ def _build_document(*, title: str, overview: str, tagline: str, genres: list[str
         parts.append("Genres: " + ", ".join(genres))
     if keywords:
         parts.append("Keywords: " + ", ".join(keywords))
+    if spoiler_excerpt:
+        parts.append(f"Plot summary: {spoiler_excerpt}")
     return _compact_ws("\n".join(parts))
 
 
@@ -103,12 +114,22 @@ def load_corpus_record(movie_json_path: Path) -> dict[str, Any] | None:
     overview = _compact_ws(str(details.get("overview") or ""))
     tagline = _compact_ws(str(details.get("tagline") or ""))
 
+    spoiler_excerpt = ""
+    spoiler_source_url = ""
+    data_dir = movie_json_path.parents[2]
+    spoiler_path = data_dir / "moviespoiler" / "parsed" / f"{tmdb_id}.json"
+    spoiler_payload = load_spoiler_file(spoiler_path)
+    if spoiler_payload:
+        spoiler_excerpt = _compact_ws(str(spoiler_payload.get("excerpt") or ""))
+        spoiler_source_url = _compact_ws(str(spoiler_payload.get("source_url") or ""))
+
     document = _build_document(
         title=title,
         overview=overview,
         tagline=tagline,
         genres=genres,
         keywords=keywords,
+        spoiler_excerpt=spoiler_excerpt,
     )
 
     return {
@@ -119,6 +140,8 @@ def load_corpus_record(movie_json_path: Path) -> dict[str, Any] | None:
         "keywords": keywords,
         "overview": overview,
         "tagline": tagline,
+        "spoiler_excerpt": spoiler_excerpt,
+        "spoiler_source_url": spoiler_source_url,
         "document": document,
     }
 

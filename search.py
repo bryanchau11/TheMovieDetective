@@ -130,12 +130,30 @@ def _tokenize(text: str) -> list[str]:
 
 def _contains_any(haystack: str, items: list[str]) -> int:
     haystack_n = _norm(haystack)
+    tokens = set(_tokenize(haystack_n))
     hits = 0
     for item in items:
         item_n = _norm(item)
-        if item_n and item_n in haystack_n:
-            hits += 1
+        if not item_n:
+            continue
+        if " " in item_n:
+            pattern = r"\b" + re.escape(item_n).replace("\\ ", r"\s+") + r"\b"
+            if re.search(pattern, haystack_n):
+                hits += 1
+        else:
+            if item_n in tokens:
+                hits += 1
     return hits
+
+
+def _distance_similarity(dist: float, min_dist: float, max_dist: float) -> float:
+    if max_dist <= min_dist:
+        return 0.0
+    if dist <= min_dist:
+        return 1.0
+    if dist >= max_dist:
+        return 0.0
+    return 1.0 - ((dist - min_dist) / (max_dist - min_dist))
 
 
 def _count_query_overlap(text: str, query_tokens: list[str], generic_terms: set[str]) -> int:
@@ -264,6 +282,8 @@ def rerank(query: str, candidates: list[dict], attributes: dict) -> list[dict]:
     setting_period = attributes.get("setting_period", "")
 
     query_tokens = _tokenize(query)
+    named_entities = [tok.lower() for tok in re.findall(r"\b[A-Z][a-z]+\b", query or "")]
+    specific_tokens = [tok for tok in query_tokens if tok not in GENERIC_TERMS]
 
     for c in candidates:
         meta = c.get("meta", {}) or {}
@@ -280,10 +300,12 @@ def rerank(query: str, candidates: list[dict], attributes: dict) -> list[dict]:
         tagline = meta.get("tagline", "") or ""
         media_type = meta.get("media_type", "movie")
         media_label = meta.get("media_label", "Movie")
+        spoiler_excerpt = meta.get("spoiler_excerpt", "") or ""
+        spoiler_source_url = meta.get("spoiler_source_url", "") or ""
 
         # Separate title text from plot text
         title_text = " ".join([title, original_title, collection_name]).lower()
-        plot_text = " ".join([overview, tagline, keywords_text, doc]).lower()
+        plot_text = " ".join([overview, tagline, keywords_text, spoiler_excerpt, doc]).lower()
         combined_text = " ".join([title_text, plot_text, genres_text]).lower()
 
         rank_index = max(1, int(c.get("rank", 1)))
@@ -342,6 +364,16 @@ def rerank(query: str, candidates: list[dict], attributes: dict) -> list[dict]:
         if title_overlap:
             score += min(2.5, title_overlap * 0.5)
 
+        entity_hits = _contains_any(plot_text, named_entities)
+        if entity_hits:
+            score += min(14.0, entity_hits * 7.0)
+            why.append("named character matched")
+
+        specific_hits = _contains_any(plot_text, specific_tokens)
+        if specific_hits:
+            score += min(10.0, specific_hits * 2.5)
+            why.append("specific clue matched")
+
         # Penalize cases where only a vague generic title word matched
         if title_overlap > 0 and plot_overlap == 0:
             generic_overlap_tokens = [tok for tok in query_tokens if tok in title_text and tok in GENERIC_TERMS]
@@ -367,6 +399,7 @@ def rerank(query: str, candidates: list[dict], attributes: dict) -> list[dict]:
         dist = c.get("dist")
         if isinstance(dist, (float, int)):
             score -= min(18.0, max(0.0, dist) * 8.0)
+            why.append("semantic similarity")
 
         # Soft cap
         if score > 95:
@@ -383,6 +416,8 @@ def rerank(query: str, candidates: list[dict], attributes: dict) -> list[dict]:
             "keywords": keywords_text,
             "media_type": media_type,
             "media_label": media_label,
+            "spoiler_excerpt": spoiler_excerpt,
+            "spoiler_source_url": spoiler_source_url,
             "score": score,
             "why": why
         })

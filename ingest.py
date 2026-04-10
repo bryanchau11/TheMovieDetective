@@ -6,6 +6,8 @@ import requests
 import chromadb
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
+from pathlib import Path
+from utils.moviespoiler import MovieSpoilerClient
 
 load_dotenv()
 
@@ -52,7 +54,14 @@ def _extract_keywords(keywords_data: dict) -> list[str]:
     return [k.get("name", "") for k in rows if k.get("name")]
 
 
-def build_title_document(item: dict, details: dict, keywords_data: dict, media_type: str) -> tuple[str, dict]:
+def build_title_document(
+    item: dict,
+    details: dict,
+    keywords_data: dict,
+    media_type: str,
+    spoiler_excerpt: str = "",
+    spoiler_source_url: str = "",
+) -> tuple[str, dict]:
     is_movie = media_type == "movie"
 
     if is_movie:
@@ -102,6 +111,7 @@ def build_title_document(item: dict, details: dict, keywords_data: dict, media_t
         f"Collection: {collection_name}" if collection_name else "",
         f"Countries: {', '.join(production_countries)}" if production_countries else "",
         f"Languages: {', '.join(spoken_languages)}" if spoken_languages else "",
+        f"Plot summary: {spoiler_excerpt}" if spoiler_excerpt else "",
     ]
 
     document = ". ".join([part for part in doc_parts if part]).strip()
@@ -118,6 +128,8 @@ def build_title_document(item: dict, details: dict, keywords_data: dict, media_t
         "poster": poster_url,
         "media_type": media_type,
         "media_label": media_label,
+        "spoiler_excerpt": spoiler_excerpt,
+        "spoiler_source_url": spoiler_source_url,
     }
 
     return document, metadata
@@ -128,6 +140,12 @@ def ingest_titles(
     reset_collection: bool = False,
     include_movies: bool = True,
     include_tv: bool = True,
+    include_spoilers: bool = False,
+    spoilers_cache_dir: str = "data/moviespoiler",
+    spoilers_allow_network: bool = True,
+    include_classics: bool = False,
+    classics_start_year: int = 1920,
+    classics_end_year: int = 1979,
 ):
     global collection
 
@@ -151,9 +169,20 @@ def ingest_titles(
 
     sources = []
     if include_movies:
-        sources.append(("movie", "/movie/popular"))
+        sources.append(("movie", "/movie/popular", {}))
     if include_tv:
-        sources.append(("tv", "/tv/popular"))
+        sources.append(("tv", "/tv/popular", {}))
+    if include_classics:
+        sources.append((
+            "movie",
+            "/discover/movie",
+            {
+                "sort_by": "popularity.desc",
+                "primary_release_date.gte": f"{classics_start_year}-01-01",
+                "primary_release_date.lte": f"{classics_end_year}-12-31",
+                "include_adult": False,
+            },
+        ))
 
     if not sources:
         print("Nothing to ingest. Enable include_movies and/or include_tv.")
@@ -161,20 +190,30 @@ def ingest_titles(
 
     print(f"🚀 Starting ingestion for movies/TV with {total_pages} pages each...")
 
-    for media_type, endpoint in sources:
+    spoiler_client = None
+    if include_spoilers:
+        spoiler_client = MovieSpoilerClient(
+            cache_dir=Path(spoilers_cache_dir),
+            allow_network=spoilers_allow_network,
+        )
+
+    for media_type, endpoint, extra_params in sources:
         media_added = 0
-        print(f"\n📦 Ingesting {media_type.upper()} titles from {endpoint}")
+        label = f"{media_type.upper()} {endpoint}"
+        print(f"\n📦 Ingesting {label}")
 
         for page in range(1, total_pages + 1):
             popular_url = f"{BASE_URL}{endpoint}"
-            popular_data = safe_get(popular_url, params={
+            params = {
                 "api_key": TMDB_API_KEY,
                 "language": "en-US",
-                "page": page
-            })
+                "page": page,
+            }
+            params.update(extra_params)
+            popular_data = safe_get(popular_url, params=params)
 
             if not popular_data or "results" not in popular_data:
-                print(f"⚠️ [{media_type}] Skipping page {page} due to fetch error.")
+                print(f"⚠️ [{label}] Skipping page {page} due to fetch error.")
                 continue
 
             ids_batch = []
@@ -207,7 +246,29 @@ def ingest_titles(
                     skipped_incomplete += 1
                     continue
 
-                document, metadata = build_title_document(item, details, keywords_data, media_type)
+                spoiler_excerpt = ""
+                spoiler_source_url = ""
+                if spoiler_client and media_type == "movie":
+                    title = details.get("title", "") or item.get("title", "")
+                    release_date = details.get("release_date", "") or item.get("release_date", "")
+                    year = release_date[:4] if release_date else ""
+                    spoiler = spoiler_client.get_summary(
+                        title=title,
+                        year=year,
+                        tmdb_id=raw_id,
+                    )
+                    if spoiler:
+                        spoiler_excerpt = spoiler.excerpt
+                        spoiler_source_url = spoiler.source_url
+
+                document, metadata = build_title_document(
+                    item,
+                    details,
+                    keywords_data,
+                    media_type,
+                    spoiler_excerpt,
+                    spoiler_source_url,
+                )
 
                 if not document.strip():
                     skipped_incomplete += 1
@@ -241,7 +302,7 @@ def ingest_titles(
 
             if page % 10 == 0 or page == total_pages:
                 print(
-                    f"✅ [{media_type}] Page {page}/{total_pages} | "
+                    f"✅ [{label}] Page {page}/{total_pages} | "
                     f"Added: {media_added} | Existing skipped: {skipped_existing} | "
                     f"Incomplete skipped: {skipped_incomplete} | Current total: {collection.count()}"
                 )
@@ -257,4 +318,10 @@ def ingest_titles(
 
 if __name__ == "__main__":
     # Set reset_collection=True only if you want a full rebuild.
-    ingest_titles(total_pages=150, reset_collection=False, include_movies=True, include_tv=True)
+    ingest_titles(
+        total_pages=150,
+        reset_collection=False,
+        include_movies=True,
+        include_tv=True,
+        include_classics=False,
+    )
