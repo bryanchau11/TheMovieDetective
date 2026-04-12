@@ -117,7 +117,7 @@ def current_result_keys(limit: int = 10) -> list[str]:
 
 
 def vote_up_results():
-    st.session_state.feedback_message = "Thank you for your feedback ??."
+    st.session_state.feedback_message = "Thank you for your feedback 😊."
 
 
 def vote_down_results():

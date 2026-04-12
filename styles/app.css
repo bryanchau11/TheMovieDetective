@@ -294,3 +294,66 @@ div[data-testid='stColumn']:has(.left-rail) {
         top: auto;
     }
 }
+
+@media (max-width: 900px) {
+    .block-container {
+        padding-top: 2rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .top-nav {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.65rem;
+    }
+
+    .archive-stat,
+    .archive-value {
+        text-align: left;
+    }
+
+    .panel-copy {
+        max-width: none;
+    }
+
+    .featured-shell {
+        padding: 0.8rem;
+    }
+
+    .stTextArea textarea {
+        min-height: 150px;
+    }
+}
+
+@media (max-width: 640px) {
+    .block-container {
+        padding-top: 1.6rem;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .panel-title {
+        font-size: clamp(1.6rem, 6vw, 2.2rem);
+    }
+
+    .movie-title {
+        font-size: clamp(1.4rem, 5vw, 2rem);
+    }
+
+    .small-card-title {
+        font-size: 0.8rem;
+    }
+
+    .small-card-meta {
+        font-size: 0.7rem;
+    }
+
+    .score-badge {
+        font-size: 0.68rem;
+    }
+
+    .clue-chip {
+        font-size: 0.66rem;
+    }
+}
